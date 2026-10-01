@@ -86,7 +86,7 @@ document.addEventListener('paste', (event) => {
 });
 ```
 
-> Clipboard events go to the focused element only if it is editable. A grid made of non-editable cells should listen on `document` (as above) and check that it has focus.
+> Clipboard events go to the focused element only if it is editable. A grid made of non-editable cells should listen on `document` (as above) and check that it has focus. (With nothing selected, Firefox fires `copy`/`cut` at `<body>`, not at the focused element.)
 
 ### Copy from your grid
 
@@ -295,7 +295,8 @@ Serialises a grid as an HTML table for the `text/html` flavour:
 
 - markup is escaped;
 - line breaks become `<br style="mso-data-placement:same-cell">`, so Excel keeps them inside the cell;
-- cells with significant whitespace get `white-space:pre-wrap`;
+- cells with significant whitespace get `white-space:pre-wrap` for browsers and editors;
+- spaces that HTML would collapse (leading, trailing, runs) are also written the way Excel writes them, `<span style="mso-spacerun:yes">&nbsp;…</span>`, because Excel ignores CSS `white-space` on paste but restores these as plain spaces;
 - the output starts with `<meta charset="utf-8">`.
 
 `parseHTMLTable(stringifyHTMLTable(grid))` returns `grid` (property-tested).
@@ -335,15 +336,17 @@ Copies the block `range = { row, col, rows, cols }` out of `grid`. Slots outside
 - **Which flavour wins?** With the default `prefer: 'auto'`, spreadsheets (whose TSV and HTML table always line up) give values from the TSV and merges from the HTML. Word and web pages usually give values from the HTML table, because their plain text doesn't line up with the cells — a caption line, or unquoted in-cell line breaks.
 - **Ambiguous trailing newline.** Spreadsheets end the last row with a line ending; gridclip therefore drops exactly one. A clipboard text of `"a\n"` is the single cell `a`.
 - **Only the first table** of an HTML fragment is read. Tables inside hidden elements and `<template>` are ignored, and so are captions.
-- **Hidden rows** that a spreadsheet includes in the clipboard are included, consistent with its plain text. (Excel's own invisible `supportMisalignedColumns` helper row is skipped.)
+- **Hidden rows** that a spreadsheet includes in the clipboard are included, consistent with its plain text. (Excel's own invisible `supportMisalignedColumns` helper row is skipped.) Excel for Windows (Microsoft 365) leaves hidden rows out of both flavours.
+- **Pasting into Excel.** Excel reads the HTML flavour. Merges, in-cell line breaks, leading/trailing and repeated spaces, quotes, Korean text and emoji arrive intact (verified with Excel for Windows). Two things are up to Excel: a tab inside a cell becomes a space (Excel drops tabs from any pasted HTML, even its own), and values are interpreted as if typed — `001234` becomes the number 1234, `=1+1` a formula, `1,234.50` a formatted number.
 - **Formulas, formats and styles** are not part of the grid. Read them through the `cell` option if you need them.
 
 ## Compatibility
 
 | Environment | Support |
 | --- | --- |
-| Chrome / Edge / Opera | Everything, verified by the automated browser tests (Chromium). |
-| Firefox, Safari (macOS, iOS) | Parsing and serialising are plain JavaScript and behave identically everywhere. The clipboard calls are feature-detected: browsers with `ClipboardItem` (Firefox 127+, Safari 13.1+) get both flavours through `navigator.clipboard.write()`, older ones fall back to `execCommand('copy')`, which writes both flavours too. In Safari, call `copyToClipboard`/`readFromClipboard` directly inside the click handler. |
+| Chrome / Edge / Opera | Everything, verified by the automated browser tests (Chromium, on Linux and Windows). |
+| Firefox | Everything, verified by the same automated browser tests, including the real system clipboard. |
+| Safari (macOS, iOS) | Parsing and serialising are plain JavaScript and behave identically everywhere; the HTML parser is checked against WebKit's parser and table layout. The clipboard calls are feature-detected: browsers with `ClipboardItem` (Firefox 127+, Safari 13.1+) get both flavours through `navigator.clipboard.write()`, older ones fall back to `execCommand('copy')`, which writes both flavours too. In Safari, call `copyToClipboard`/`readFromClipboard` directly inside the click handler. |
 | Non-secure pages (`http:`) | `copy`/`paste` events and `copyToClipboard` (via `execCommand`) work; `readFromClipboard` needs HTTPS. |
 | Node.js 14+, Deno, Bun, workers, edge | All pure functions (parsing, serialising, `applyPaste`). The two async clipboard functions reject with a clear error. |
 | TypeScript | Types for ESM and CommonJS, any `moduleResolution` (`node10`, `node16`, `bundler`). |
@@ -354,14 +357,14 @@ The parsers use nothing beyond ES2018/ES2020 built-ins.
 
 gridclip is tested at several levels (`npm run check` runs them all):
 
-- **Unit tests** (Vitest): about 300 cases, including clipboard HTML fixtures modelled on Excel for Windows, Google Sheets, LibreOffice, Word and a web-page table. Line coverage is 100%.
+- **Unit tests** (Vitest): about 320 cases, including clipboard HTML fixtures modelled on Excel for Windows, Google Sheets, LibreOffice, Word and a web-page table, and clipboard data captured from real Excel for Windows ([test/fixtures/REAL-CAPTURES.md](./test/fixtures/REAL-CAPTURES.md)). Line coverage is 100%.
 - **Property-based tests** (fast-check): TSV and HTML round-trips over arbitrary Unicode, including lone surrogates, control characters, quotes, tabs and line breaks, for every delimiter and line-ending combination. Also fuzzing for crashes and invariants (rectangular output, non-overlapping merges) and a reference model for `applyPaste`.
-- **Differential tests against Chromium**: generated tables are parsed by gridclip and by the browser, then compared.
+- **Differential tests against Chromium, Firefox and WebKit**: generated tables are parsed by gridclip and by the browser, then compared. gridclip follows Chromium exactly; in the other engines only documented engine differences are tolerated, and reported (overlapping cells, which no spreadsheet produces; a single space at the end of a line in Firefox's `innerText`; WebKit's `innerText`, which disagrees with its own layout, is not used).
   - Cell positions and spans are checked against the browser's actual **layout**.
   - Fuzzed malformed markup is checked against the browser's **tree builder**.
   - Character references are checked in text and attributes.
   - Cell text is checked against `innerText` (exact match for inline content, line-by-line where `innerText` adds line breaks that don't render).
-- **End-to-end tests** with the real system clipboard in Chromium (the browser available in CI): keyboard copy and paste, cut, pasting into `<textarea>` and `contenteditable`, the Async Clipboard API, and the `execCommand`/`writeText` fallbacks. Also the demo app, driven like a user would.
+- **End-to-end tests** with the real system clipboard in Chromium and Firefox (and WebKit on Linux; Playwright's WebKit for Windows has no working clipboard): keyboard copy and paste, cut, pasting into `<textarea>` and `contenteditable`, the Async Clipboard API, and the `execCommand`/`writeText` fallbacks. Also the demo app, driven like a user would. Run one engine with `npm run test:browser:firefox` (or `:chromium`, `:webkit`); `npx playwright install chromium firefox webkit` installs them.
 - **Runtimes and packaging**: smoke tests of the built ESM and CommonJS packages on Node 14, 16, 18, 20, 22 and 24, Bun and Deno. Type tests against the published declarations under `node10`, `node16` and `bundler` resolution. `publint` and `@arethetypeswrong/cli`.
 
 ## License
