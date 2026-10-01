@@ -85,6 +85,7 @@ describe('keyboard copy and paste', () => {
     await page.evaluate((grid) => window.gridclip.copyToClipboard(grid), GRID);
     await page.focus('#paste-target');
     await page.keyboard.press(`${modifier}+KeyV`);
+    // Textareas normalise line endings to \n, whatever the platform clipboard uses.
     const value = await page.inputValue('#paste-target');
     assert.equal(value, await page.evaluate((grid) => window.gridclip.stringifyTSV(grid), GRID));
   });
@@ -182,7 +183,9 @@ describe('fallbacks', () => {
       return { method, text: await navigator.clipboard.readText() };
     }, GRID);
     assert.equal(result.method, 'write-text');
-    assert.equal(result.text, await ctx.page.evaluate((grid) => window.gridclip.stringifyTSV(grid), GRID));
+    // The system clipboard may convert line endings (Windows stores CRLF), so
+    // compare what the text means rather than its exact bytes.
+    assert.deepEqual(await ctx.page.evaluate((text) => window.gridclip.parseTSV(text), result.text), GRID);
   });
 
   it('rejects with a helpful error when nothing works', async () => {
