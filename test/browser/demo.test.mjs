@@ -1,8 +1,8 @@
 // Drives examples/demo.html like a user: select, copy, clear, paste.
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { after, before, it } from 'node:test';
-import { launch } from './harness.mjs';
+import { fileURLToPath } from 'node:url';
+import { browserName, clipboardUnsupported, launch } from './harness.mjs';
 
 let ctx;
 before(async () => {
@@ -12,7 +12,7 @@ after(async () => {
   await ctx?.close();
 });
 
-it('copies a selection with merged cells and pastes it back', async () => {
+it('copies a selection with merged cells and pastes it back', { skip: clipboardUnsupported }, async () => {
   const { page, origin } = ctx;
   await page.setViewportSize({ width: 1000, height: 640 });
   await page.goto(`${origin}/examples/demo.html`);
@@ -43,8 +43,8 @@ it('copies a selection with merged cells and pastes it back', async () => {
   await page.keyboard.press(`${modifier}+KeyV`);
   for (const c of [0, 1, 2]) assert.equal(await page.textContent(`td[data-r="7"][data-c="${c}"]`), 'x');
 
-  // Refresh the README screenshot only when asked: UPDATE_SCREENSHOT=1
-  if (process.env.UPDATE_SCREENSHOT) {
+  // Refresh the README screenshot only when asked, from one engine: UPDATE_SCREENSHOT=1
+  if (process.env.UPDATE_SCREENSHOT && browserName === 'chromium') {
     await page.click('#sample');
     await page.click('td[data-r="1"][data-c="0"]');
     await page.click('td[data-r="4"][data-c="5"]', { modifiers: ['Shift'] });

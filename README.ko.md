@@ -92,7 +92,7 @@ document.addEventListener('paste', (event) => {
 });
 ```
 
-> 클립보드 이벤트는 포커스된 요소가 편집 가능할 때만 그 요소로 전달됩니다. 셀이 편집 불가능한 그리드라면 위 예제처럼 `document`에서 이벤트를 받고 그리드에 포커스가 있는지 확인하세요.
+> 클립보드 이벤트는 포커스된 요소가 편집 가능할 때만 그 요소로 전달됩니다. 셀이 편집 불가능한 그리드라면 위 예제처럼 `document`에서 이벤트를 받고 그리드에 포커스가 있는지 확인하세요. (선택 영역이 없으면 Firefox는 `copy`/`cut` 이벤트를 포커스된 요소가 아니라 `<body>`로 보냅니다.)
 
 ### 그리드에서 복사하기
 
@@ -287,7 +287,10 @@ parseHTMLTable(html, {
 `stringifyHTMLTable`이 만드는 HTML:
 - 마크업을 이스케이프합니다.
 - 줄바꿈은 엑셀이 셀 안에 유지하는 `<br style="mso-data-placement:same-cell">`로 씁니다.
-- 공백이 의미 있는 셀에는 `white-space:pre-wrap`을 붙입니다.
+- 공백이 의미 있는 셀에는 브라우저와 편집기를 위해 `white-space:pre-wrap`을 붙입니다.
+- HTML에서 접히는 공백(앞뒤 공백, 연속 공백)은 Excel과 같은 방식인 `<span style="mso-spacerun:yes">&nbsp;…</span>`으로도 씁니다. Excel은 붙여넣을 때 CSS `white-space`를 무시하지만 이 표기는 일반 공백으로 되살립니다.
+
+> **Excel에 붙여넣기.** Excel은 HTML 형식을 읽습니다. 병합, 셀 안 줄바꿈, 앞뒤·연속 공백, 따옴표, 한글, 이모지는 그대로 들어갑니다(Windows용 Excel로 확인). 다음 두 가지는 Excel이 정합니다. 셀 안의 탭은 공백이 됩니다(Excel은 붙여넣은 HTML의 탭을 버리며, Excel 자신이 만든 HTML도 마찬가지입니다). 값은 직접 입력한 것처럼 해석됩니다. `001234`는 숫자 1234, `=1+1`은 수식, `1,234.50`은 서식 있는 숫자가 됩니다. 또 Windows용 Excel(Microsoft 365)은 숨긴 행을 두 형식 모두에서 빼고 복사합니다.
 - `<meta charset="utf-8">`을 앞에 붙입니다.
 
 옵션: `merges`, `headerRows`.
@@ -314,8 +317,9 @@ applyPaste([['a', 'b'], ['c', 'd']], [['X']], { rows: 2, cols: 2 }).grid; // [['
 
 | 환경 | 지원 |
 | --- | --- |
-| Chrome / Edge / Opera | 전체 기능. 자동화된 브라우저 테스트(Chromium)로 검증합니다. |
-| Firefox, Safari | 파싱과 직렬화는 순수 JavaScript라 어디서나 똑같이 동작합니다. 클립보드 호출은 기능을 감지해서 고릅니다. `ClipboardItem`이 있으면(Firefox 127+, Safari 13.1+) `navigator.clipboard.write()`로, 없으면 `execCommand('copy')`로 두 형식을 모두 씁니다. Safari에서는 클릭 핸들러 안에서 바로 호출하세요. |
+| Chrome / Edge / Opera | 전체 기능. 자동화된 브라우저 테스트(Chromium, Linux와 Windows)로 검증합니다. |
+| Firefox | 전체 기능. 실제 시스템 클립보드를 포함해 같은 자동화 브라우저 테스트로 검증합니다. |
+| Safari | 파싱과 직렬화는 순수 JavaScript라 어디서나 똑같이 동작하며, HTML 파서는 WebKit의 파서·표 레이아웃과 대조합니다. 클립보드 호출은 기능을 감지해서 고릅니다. `ClipboardItem`이 있으면(Firefox 127+, Safari 13.1+) `navigator.clipboard.write()`로, 없으면 `execCommand('copy')`로 두 형식을 모두 씁니다. Safari에서는 클릭 핸들러 안에서 바로 호출하세요. |
 | `http:` 페이지 | `copy`/`paste` 이벤트와 `copyToClipboard`(`execCommand` 경유)는 동작합니다. `readFromClipboard`는 HTTPS가 필요합니다. |
 | Node.js 14+, Deno, Bun, 워커, 엣지 | 순수 함수(파싱, 직렬화, `applyPaste`)는 모두 동작합니다. 비동기 클립보드 함수 두 개는 이유를 알려 주는 오류로 reject합니다. |
 | TypeScript | ESM과 CommonJS 타입을 모두 제공하며, `node10`/`node16`/`bundler` 해석 모두 지원합니다. |
@@ -324,17 +328,17 @@ applyPaste([['a', 'b'], ['c', 'd']], [['X']], { rows: 2, cols: 2 }).grid; // [['
 
 `npm run check`로 아래를 모두 실행합니다.
 
-- **단위 테스트**(Vitest): 약 300개 케이스입니다. Windows용 Excel, Google 스프레드시트, LibreOffice, Word, 웹 페이지 표를 본뜬 클립보드 HTML 픽스처를 포함하며, 라인 커버리지는 100%입니다.
+- **단위 테스트**(Vitest): 약 320개 케이스입니다. Windows용 Excel, Google 스프레드시트, LibreOffice, Word, 웹 페이지 표를 본뜬 클립보드 HTML 픽스처와, 실제 Windows용 Excel에서 캡처한 클립보드 데이터([test/fixtures/REAL-CAPTURES.md](./test/fixtures/REAL-CAPTURES.md))를 포함하며, 라인 커버리지는 100%입니다.
 - **속성 기반 테스트**(fast-check):
   - 고립된 서로게이트, 제어 문자, 따옴표, 탭, 줄바꿈을 포함한 임의의 유니코드로 TSV와 HTML 왕복을 검증합니다.
   - 퍼징으로 충돌이 없는지, 그리고 결과가 직사각형인지와 병합이 겹치지 않는지를 확인합니다.
   - `applyPaste`는 참조 모델과 비교합니다.
-- **Chromium 대조 테스트**: 생성한 입력을 gridclip과 브라우저가 각각 파싱한 뒤 결과를 비교합니다. 매번 수만 건을 비교합니다.
+- **Chromium·Firefox·WebKit 대조 테스트**: 생성한 입력을 gridclip과 브라우저가 각각 파싱한 뒤 결과를 비교합니다. 매번 수만 건을 비교합니다. gridclip은 Chromium과 정확히 일치하며, 다른 엔진에서는 문서화된 엔진 차이만 허용하고 그 건수를 보고합니다(스프레드시트가 만들지 않는 겹치는 셀, Firefox `innerText`의 줄 끝 공백 하나. WebKit `innerText`는 자기 레이아웃과도 달라 비교에 쓰지 않습니다).
   - 셀 위치와 span은 실제 레이아웃과 비교합니다.
   - 퍼징한 잘못된 마크업은 브라우저의 트리 빌더와 비교합니다.
   - 문자 참조는 텍스트와 속성에서 비교합니다.
   - 셀 텍스트는 `innerText`와 비교합니다.
-- **E2E 테스트**: Chromium에서 실제 시스템 클립보드로 확인합니다. 키보드 복사·붙여넣기, 잘라내기, `<textarea>`와 `contenteditable`에 붙여넣기, Async Clipboard API, `execCommand`/`writeText` 대체 경로를 확인하고, 데모 앱도 사용자처럼 조작해 봅니다.
+- **E2E 테스트**: Chromium과 Firefox에서 실제 시스템 클립보드로 확인합니다(Playwright는 WebKit에 클립보드 접근 권한을 줄 수 없어 WebKit에서는 브라우저 자체의 텍스트 붙여넣기만 확인하며, Safari는 직접 확인합니다). 엔진 하나만 돌리려면 `npm run test:browser:firefox`(또는 `:chromium`, `:webkit`)를 쓰고, 브라우저는 `npx playwright install chromium firefox webkit`으로 설치합니다. 키보드 복사·붙여넣기, 잘라내기, `<textarea>`와 `contenteditable`에 붙여넣기, Async Clipboard API, `execCommand`/`writeText` 대체 경로를 확인하고, 데모 앱도 사용자처럼 조작해 봅니다.
 - **런타임·패키징**:
   - 빌드된 ESM/CommonJS 패키지를 Node 14·16·18·20·22·24, Bun, Deno에서 스모크 테스트합니다.
   - 배포되는 타입 선언을 `node10`/`node16`/`bundler` 해석 방식으로 각각 컴파일해 봅니다.

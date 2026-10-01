@@ -1,0 +1,10 @@
+# Check out text files with LF everywhere so Windows working trees (core.autocrlf=true)
+# match CI and the published package byte for byte.
+* text=auto eol=lf
+
+# Clipboard data captured from real applications must stay byte-exact:
+# Windows apps write CRLF, browsers on other platforms or Firefox may write LF.
+test/fixtures/*-real.* -text
+test/fixtures/*-real/** -text
+
+*.png binary

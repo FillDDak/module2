@@ -552,6 +552,19 @@ describe('stringifyHTMLTable', () => {
     }
   });
 
+  it('writes collapsible spaces as Excel does, since Excel ignores CSS white-space on paste', () => {
+    const run = (n: number) => `<span style="mso-spacerun:yes">${'&nbsp;'.repeat(n)}</span>`;
+    expect(stringifyHTMLTable([['  a  ', 'a   b', ' ', 'a b', ' x\n  y ']])).toContain(
+      `<td style="white-space:pre-wrap">${run(2)}a${run(2)}</td>` +
+        `<td style="white-space:pre-wrap">a${run(3)}b</td>` +
+        `<td style="white-space:pre-wrap">${run(1)}</td>` +
+        '<td>a b</td>' +
+        `<td style="white-space:pre-wrap">${run(1)}x<br style="mso-data-placement:same-cell">${run(2)}y${run(1)}</td>`,
+    );
+    // A real no-break space stays one.
+    expect(stringifyHTMLTable([['a b']])).toContain('<td>a b</td>');
+  });
+
   it('pads ragged rows and converts values', () => {
     expect(stringifyHTMLTable([['a', 1], [null]])).toContain('<tr><td>a</td><td>1</td></tr><tr><td></td><td></td></tr>');
   });
