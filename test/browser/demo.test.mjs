@@ -43,9 +43,11 @@ it('copies a selection with merged cells and pastes it back', { skip: clipboardU
   await page.keyboard.press(`${modifier}+KeyV`);
   for (const c of [0, 1, 2]) assert.equal(await page.textContent(`td[data-r="7"][data-c="${c}"]`), 'x');
 
-  await page.click('#sample');
-  await page.click('td[data-r="1"][data-c="0"]');
-  await page.click('td[data-r="4"][data-c="5"]', { modifiers: ['Shift'] });
-  // docs/demo.png is the README screenshot; keep it rendered by one engine.
-  if (browserName === 'chromium') await page.screenshot({ path: fileURLToPath(new URL('../../docs/demo.png', import.meta.url)) });
+  // Refresh the README screenshot only when asked, from one engine: UPDATE_SCREENSHOT=1
+  if (process.env.UPDATE_SCREENSHOT && browserName === 'chromium') {
+    await page.click('#sample');
+    await page.click('td[data-r="1"][data-c="0"]');
+    await page.click('td[data-r="4"][data-c="5"]', { modifiers: ['Shift'] });
+    await page.screenshot({ path: fileURLToPath(new URL('../../docs/demo.png', import.meta.url)) });
+  }
 });

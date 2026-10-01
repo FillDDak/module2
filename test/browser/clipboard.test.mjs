@@ -92,6 +92,7 @@ describe('keyboard copy and paste', () => {
     await page.evaluate((grid) => window.gridclip.copyToClipboard(grid), GRID);
     await page.focus('#paste-target');
     await page.keyboard.press(`${modifier}+KeyV`);
+    // Textareas normalise line endings to \n, whatever the platform clipboard uses.
     const value = await page.inputValue('#paste-target');
     assert.equal(value, await page.evaluate((grid) => window.gridclip.stringifyTSV(grid), GRID));
   });
