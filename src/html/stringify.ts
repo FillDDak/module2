@@ -13,11 +13,21 @@ const escapeText = (value: string) => value.replace(/&/g, '&amp;').replace(/</g,
 /** Line break that Excel keeps inside the cell instead of starting a new row. */
 const BR = '<br style="mso-data-placement:same-cell">';
 
+/**
+ * Spaces HTML would collapse, written the way Excel writes them. Excel ignores
+ * CSS `white-space` when pasting HTML but turns the no-break spaces of an
+ * `mso-spacerun` back into plain spaces (verified with Excel for Windows).
+ */
+const spacerun = (run: string) => `<span style="mso-spacerun:yes">${'&nbsp;'.repeat(run.length)}</span>`;
+
 function cellHTML(value: string): { attrs: string; html: string } {
   // Whitespace that HTML would otherwise collapse: tabs, form feeds, runs of
   // spaces, and spaces at the start or end of a line.
   const needsPre = /[\t\f]| {2}|(?:^|[\r\n]) | (?:[\r\n]|$)/.test(value);
-  let html = escapeText(value).replace(/\r\n|\r|\n/g, BR);
+  let html = value
+    .split(/\r\n|\r|\n/)
+    .map((line) => escapeText(line).replace(/^ +| +$| {2,}/g, spacerun))
+    .join(BR);
   // A final line break only shows (and survives parsing) when followed by another.
   if (/[\r\n]$/.test(value)) html += BR;
   return { attrs: needsPre ? ' style="white-space:pre-wrap"' : '', html };
