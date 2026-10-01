@@ -1,5 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["node"], "noUnusedLocals": false },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // test/types compiles against the built package; `npm run test:types` checks it after building.
+  "exclude": ["test/types"]
 }
