@@ -91,13 +91,15 @@ const PRE_DEFAULT: Record<string, WhiteSpace> = {
 
 interface StyleInfo {
   ws: WhiteSpace | undefined;
+  /** Excel's `mso-spacerun: yes`, whose no-break spaces Excel reads back as plain spaces. */
+  spacerun: boolean | undefined;
   hidden: boolean;
   ignoreColspan: boolean;
   ignoreRowspan: boolean;
 }
 
 function parseStyle(attrs: Record<string, string>): StyleInfo {
-  const info: StyleInfo = { ws: undefined, hidden: 'hidden' in attrs, ignoreColspan: false, ignoreRowspan: false };
+  const info: StyleInfo = { ws: undefined, spacerun: undefined, hidden: 'hidden' in attrs, ignoreColspan: false, ignoreRowspan: false };
   const style = attrs.style;
   if (!style) return info;
   for (const decl of style.replace(/\/\*[\s\S]*?\*\//g, '').split(';')) {
@@ -115,7 +117,8 @@ function parseStyle(attrs: Record<string, string>): StyleInfo {
         break;
       }
       case 'mso-spacerun':
-        if (value === 'yes') info.ws = 'preserve';
+        info.spacerun = value === 'yes';
+        if (info.spacerun) info.ws = 'preserve';
         break;
       case 'display':
         if (value === 'none') info.hidden = true;
@@ -155,6 +158,7 @@ interface Cell {
 interface OpenElement {
   name: string;
   ws: WhiteSpace;
+  spacerun: boolean;
   hidden: boolean;
 }
 
@@ -297,6 +301,9 @@ class TableBuilder {
         else if (text.startsWith('\r\n')) text = text.slice(2);
         else if (text[0] === '\r') text = text.slice(1);
       }
+      // Excel writes the spaces of an mso-spacerun as `&nbsp;` and turns them
+      // back into plain spaces on paste (verified with Excel for Windows).
+      if (this.stack[this.stack.length - 1]?.spacerun) text = text.replace(/ /g, ' ');
       if (text) this.text!.text(text, this.whiteSpace());
     } else if (!this.inCaption && this.strayInvisible.length === 0 && /[^\t\n\f\r \u00a0]/.test(value)) {
       this.strayText = true;
@@ -326,7 +333,8 @@ class TableBuilder {
     // Elements that are not rendered produce no line breaks either.
     if (BLOCK.has(name) && !hidden) this.text!.softBreak();
     if (VOID.has(name)) return;
-    this.stack.push({ name, ws: style.ws ?? PRE_DEFAULT[name] ?? this.whiteSpace(), hidden });
+    const spacerun = style.spacerun ?? (this.stack.length > 0 && this.stack[this.stack.length - 1]!.spacerun);
+    this.stack.push({ name, ws: style.ws ?? PRE_DEFAULT[name] ?? this.whiteSpace(), spacerun, hidden });
     if (name === 'pre' || name === 'listing') this.skipNewline = true;
   }
 
@@ -458,7 +466,7 @@ class TableBuilder {
 
     this.cell = cell;
     this.text = new TextBuilder();
-    this.stack = [{ name: tag, ws: style.ws ?? 'collapse', hidden: false }];
+    this.stack = [{ name: tag, ws: style.ws ?? 'collapse', spacerun: style.spacerun ?? false, hidden: false }];
     this.skipNewline = false;
   }
 

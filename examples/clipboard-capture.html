@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gridclip clipboard capture</title>
+    <style>
+      :root { color-scheme: light dark; --border: #8886; --accent: #2563eb; }
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 860px; margin: 24px auto; padding: 0 16px; }
+      h1 { font-size: 20px; }
+      h2 { font-size: 16px; margin-top: 28px; }
+      table { border-collapse: collapse; margin: 8px 0; }
+      td { border: 1px solid var(--border); padding: 2px 8px; white-space: pre-wrap; vertical-align: top; }
+      .box { border: 2px dashed var(--border); border-radius: 8px; padding: 12px; outline: none; }
+      .box:focus { border-color: var(--accent); }
+      button { font: inherit; padding: 4px 12px; }
+      pre { white-space: pre-wrap; word-break: break-all; background: #8881; padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
+      #status { font-weight: 600; }
+    </style>
+    <script src="../dist/gridclip.global.js"></script>
+  </head>
+  <body>
+    <h1>gridclip clipboard capture</h1>
+    <p>
+      A tool for checking gridclip against real applications. Serve the repository root
+      (<code>npm run build &amp;&amp; npx http-server .</code>) and open <code>/examples/clipboard-capture.html</code>.
+    </p>
+
+    <h2>1. Copy a test grid out of gridclip</h2>
+    <p>Click the box and press Ctrl+C (or use the button), then paste into Excel or Google Sheets.</p>
+    <div id="source" class="box" tabindex="0"><table id="preview"></table></div>
+    <p><button id="copy-button">Copy with copyToClipboard()</button> <span id="copy-log"></span></p>
+
+    <h2>2. Paste from another application</h2>
+    <p>
+      Label: <input id="label" value="google-sheets" size="24" />
+      Click the box and press Ctrl+V. Everything the paste event exposes is recorded.
+    </p>
+    <div id="target" class="box" tabindex="0">Paste here</div>
+    <p id="status"></p>
+    <p><button id="download" disabled>Download capture (.json)</button></p>
+    <h3>Parsed by gridclip</h3>
+    <table id="parsed"></table>
+    <h3>text/plain</h3>
+    <pre id="text"></pre>
+    <h3>text/html</h3>
+    <pre id="html"></pre>
+
+    <script>
+      const { setClipboardData, copyToClipboard, parseClipboard } = window.gridclip;
+      const GRID = [
+        ['병합 머리글', '', '', 'x'],
+        ['이름', '메모', '따옴표', '숫자'],
+        ['세로 병합', '첫째 줄\n둘째 줄', '"quoted" and "more"', '001234'],
+        ['', '  앞뒤 공백  ', 'tab\there', '1,234.50'],
+        ['<b>not html</b>', 'a & b', '😀 emoji', 'a  b'],
+      ];
+      const MERGES = [
+        { row: 0, col: 0, rowSpan: 1, colSpan: 3 },
+        { row: 2, col: 0, rowSpan: 2, colSpan: 1 },
+      ];
+      const show = (table, rows, merges) => {
+        const inside = (r, c, m) => r >= m.row && r < m.row + m.rowSpan && c >= m.col && c < m.col + m.colSpan;
+        table.replaceChildren();
+        rows.forEach((row, r) => {
+          const tr = table.insertRow();
+          row.forEach((value, c) => {
+            const merge = merges.find((m) => inside(r, c, m));
+            if (merge && (merge.row !== r || merge.col !== c)) return;
+            const td = tr.insertCell();
+            if (merge) Object.assign(td, { rowSpan: merge.rowSpan, colSpan: merge.colSpan });
+            td.textContent = JSON.stringify(value).slice(1, -1);
+          });
+        });
+      };
+      show(document.getElementById('preview'), GRID, MERGES);
+
+      const source = document.getElementById('source');
+      const target = document.getElementById('target');
+      // Non-editable elements: listen on document and check focus (Firefox targets <body>).
+      document.addEventListener('copy', (event) => {
+        if (document.activeElement !== source) return;
+        setClipboardData(event, GRID, { merges: MERGES });
+        document.getElementById('copy-log').textContent = 'Copied with setClipboardData().';
+      });
+      document.getElementById('copy-button').addEventListener('click', async () => {
+        const method = await copyToClipboard(GRID, { merges: MERGES }).catch((e) => e.message);
+        document.getElementById('copy-log').textContent = `copyToClipboard() → ${method}`;
+      });
+
+      let capture = null;
+      document.addEventListener('paste', (event) => {
+        if (document.activeElement !== target) return;
+        event.preventDefault();
+        const data = event.clipboardData;
+        const flavours = {};
+        for (const type of data.types) if (type !== 'Files') flavours[type] = data.getData(type);
+        const parsed = parseClipboard(event);
+        capture = {
+          label: document.getElementById('label').value,
+          capturedAt: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          types: [...data.types],
+          flavours,
+          parsed,
+        };
+        document.getElementById('status').textContent =
+          `Captured ${data.types.join(', ')} — parsed ${parsed.rows.length}×${parsed.rows[0]?.length ?? 0} from the ${parsed.source} flavour, ${parsed.merges.length} merge(s).`;
+        document.getElementById('text').textContent = flavours['text/plain'] ?? '';
+        document.getElementById('html').textContent = flavours['text/html'] ?? '';
+        show(document.getElementById('parsed'), parsed.rows, parsed.merges);
+        document.getElementById('download').disabled = false;
+      });
+      document.getElementById('download').addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(capture, null, 2)], { type: 'application/json' });
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `capture-${capture.label}.json` });
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+    </script>
+  </body>
+</html>
