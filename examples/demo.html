@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gridclip demo</title>
+    <style>
+      :root {
+        --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --head: #f6f8fa;
+        --sel: rgba(9, 105, 218, 0.12); --sel-line: #0969da; --merge: #fff8c5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --head: #161b22; --sel: rgba(56, 139, 253, 0.2); --sel-line: #388bfd; --merge: #3b2e00; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      main { max-width: 960px; margin: 0 auto; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      p { margin: 0 0 16px; color: var(--muted); }
+      kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 12px; background: var(--head); }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+      button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--head); color: var(--fg); cursor: pointer; }
+      button:hover { border-color: var(--sel-line); }
+      .scroll { overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+      table { border-collapse: collapse; user-select: none; }
+      th, td { border: 1px solid var(--line); min-width: 96px; height: 28px; padding: 2px 6px; white-space: pre-wrap; vertical-align: top; }
+      th { background: var(--head); color: var(--muted); font-weight: 500; min-width: 36px; text-align: center; }
+      td.sel { background: var(--sel); outline: 1px solid var(--sel-line); outline-offset: -1px; }
+      td.merged { background: var(--merge); }
+      td.sel.merged { background: var(--sel); }
+      #grid:focus { outline: none; }
+      .log { margin-top: 12px; font: 12px/1.4 ui-monospace, monospace; color: var(--muted); min-height: 1.4em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>gridclip demo</h1>
+      <p>
+        Copy cells from Excel, Google Sheets, LibreOffice or any web table and paste them here with <kbd>Ctrl</kbd>+<kbd>V</kbd>.
+        Select cells (click, <kbd>Shift</kbd>+click) and copy them back with <kbd>Ctrl</kbd>+<kbd>C</kbd> — merged cells and line breaks survive both ways.
+        Pasting a single cell into a larger selection fills it, like a spreadsheet.
+      </p>
+      <div class="toolbar">
+        <button id="copy">Copy selection</button>
+        <button id="paste">Paste (Clipboard API)</button>
+        <button id="sample">Load sample</button>
+        <button id="clear">Clear</button>
+      </div>
+      <div class="scroll"><table id="grid" tabindex="0"></table></div>
+      <div class="log" id="log" aria-live="polite"></div>
+    </main>
+    <script src="../dist/gridclip.global.js"></script>
+    <script>
+      const { parseClipboard, setClipboardData, applyPaste, sliceGrid, copyToClipboard, readFromClipboard } = gridclip;
+
+      const ROWS = 8;
+      const COLS = 6;
+      let cells = Array.from({ length: ROWS }, () => Array(COLS).fill(''));
+      let merges = [];
+      let anchor = { row: 0, col: 0 };
+      let focus = { row: 0, col: 0 };
+
+      const table = document.getElementById('grid');
+      const log = (message) => (document.getElementById('log').textContent = message);
+      const selection = () => ({
+        row: Math.min(anchor.row, focus.row),
+        col: Math.min(anchor.col, focus.col),
+        rows: Math.abs(anchor.row - focus.row) + 1,
+        cols: Math.abs(anchor.col - focus.col) + 1,
+      });
+      const inside = (r, c, m) => r >= m.row && r < m.row + (m.rowSpan ?? m.rows) && c >= m.col && c < m.col + (m.colSpan ?? m.cols);
+
+      function render() {
+        const sel = selection();
+        const width = Math.max(COLS, ...cells.map((row) => row.length));
+        let html = '<tr><th></th>';
+        for (let c = 0; c < width; c++) html += `<th>${String.fromCharCode(65 + (c % 26))}</th>`;
+        html += '</tr>';
+        cells.forEach((row, r) => {
+          html += `<tr><th>${r + 1}</th>`;
+          for (let c = 0; c < width; c++) {
+            const merge = merges.find((m) => inside(r, c, m));
+            if (merge && (merge.row !== r || merge.col !== c)) continue;
+            const span = merge ? ` rowspan="${merge.rowSpan}" colspan="${merge.colSpan}"` : '';
+            const cls = [inside(r, c, sel) ? 'sel' : '', merge ? 'merged' : ''].join(' ').trim();
+            const text = (row[c] ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+            html += `<td data-r="${r}" data-c="${c}"${span} class="${cls}">${text}</td>`;
+          }
+          html += '</tr>';
+        });
+        table.innerHTML = html;
+      }
+
+      table.addEventListener('mousedown', (event) => {
+        const td = event.target.closest('td');
+        if (!td) return;
+        const pos = { row: +td.dataset.r, col: +td.dataset.c };
+        if (!event.shiftKey) anchor = pos;
+        focus = pos;
+        // Re-rendering replaces the clicked cell, so take over focus handling.
+        event.preventDefault();
+        table.focus();
+        render();
+      });
+
+      // Clipboard events go to the focused element only if it is editable, so a
+      // grid listens on the document and checks that it has focus.
+      const gridFocused = () => document.activeElement === table;
+
+      // Copy: put the selection on the clipboard as TSV + an HTML table with merges.
+      document.addEventListener('copy', (event) => {
+        if (!gridFocused()) return;
+        const sel = selection();
+        const block = sliceGrid(cells, sel);
+        const blockMerges = merges
+          .filter((m) => m.row >= sel.row && m.col >= sel.col && m.row + m.rowSpan <= sel.row + sel.rows && m.col + m.colSpan <= sel.col + sel.cols)
+          .map((m) => ({ ...m, row: m.row - sel.row, col: m.col - sel.col }));
+        setClipboardData(event, block, { merges: blockMerges });
+        log(`Copied ${sel.rows}×${sel.cols} cells${blockMerges.length ? ` with ${blockMerges.length} merged block(s)` : ''}.`);
+      });
+
+      // Paste: read whatever the user copied and write it into the grid.
+      function paste(data) {
+        if (!data.rows.length) return log('Nothing to paste.');
+        const sel = selection();
+        const { grid, range } = applyPaste(cells, data.rows, sel);
+        cells = grid;
+        // Merges that were overwritten disappear; pasted merges are added (tiled with the data).
+        merges = merges.filter((m) => !(m.row < range.row + range.rows && m.row + m.rowSpan > range.row && m.col < range.col + range.cols && m.col + m.colSpan > range.col));
+        const h = data.rows.length;
+        const w = data.rows[0].length;
+        for (let dy = 0; dy < range.rows; dy += h) {
+          for (let dx = 0; dx < range.cols; dx += w) {
+            for (const m of data.merges) merges.push({ ...m, row: m.row + range.row + dy, col: m.col + range.col + dx });
+          }
+        }
+        anchor = { row: range.row, col: range.col };
+        focus = { row: range.row + range.rows - 1, col: range.col + range.cols - 1 };
+        render();
+        log(`Pasted ${range.rows}×${range.cols} cells from the ${data.source} flavour${data.merges.length ? `, ${data.merges.length} merged block(s)` : ''}.`);
+      }
+      document.addEventListener('paste', (event) => {
+        if (!gridFocused()) return;
+        event.preventDefault();
+        paste(parseClipboard(event));
+      });
+
+      table.addEventListener('keydown', (event) => {
+        const moves = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+        if (moves[event.key]) {
+          const [dr, dc] = moves[event.key];
+          focus = { row: Math.max(0, Math.min(cells.length - 1, focus.row + dr)), col: Math.max(0, Math.min(cells[0].length - 1, focus.col + dc)) };
+          if (!event.shiftKey) anchor = focus;
+          event.preventDefault();
+          render();
+        } else if (event.key === 'Delete' || event.key === 'Backspace') {
+          const sel = selection();
+          cells = applyPaste(cells, [['']], sel).grid;
+          render();
+        }
+      });
+
+      document.getElementById('copy').addEventListener('click', async () => {
+        const sel = selection();
+        const method = await copyToClipboard(sliceGrid(cells, sel)).catch((e) => e.message);
+        log(`copyToClipboard → ${method}`);
+      });
+      document.getElementById('paste').addEventListener('click', async () => {
+        try {
+          paste(await readFromClipboard());
+        } catch (error) {
+          log(error.message);
+        }
+      });
+      document.getElementById('sample').addEventListener('click', () => {
+        cells = [
+          ['Quarterly report', '', '', '', '', ''],
+          ['Region', 'Q1', 'Q2', 'Q3', 'Q4', 'Note'],
+          ['서울', '1,200', '1,350', '1,410', '1,600', 'Best quarter\nso far'],
+          ['Busan', '800', '760', '905', '990', ''],
+          ['Total', '2,000', '2,110', '2,315', '2,590', '"approx."'],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+        ];
+        merges = [{ row: 0, col: 0, rowSpan: 1, colSpan: 6 }];
+        render();
+        log('Sample loaded. Select it and press Ctrl+C, then paste into Excel or Google Sheets.');
+      });
+      document.getElementById('clear').addEventListener('click', () => {
+        cells = Array.from({ length: ROWS }, () => Array(COLS).fill(''));
+        merges = [];
+        render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>
