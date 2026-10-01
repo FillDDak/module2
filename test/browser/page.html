@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>gridclip browser tests</title>
+    <style>
+      body { margin: 0; font: 16px/1.2 sans-serif; }
+      #sandbox { position: absolute; left: 0; top: 0; }
+      #sandbox table { border-collapse: collapse; border-spacing: 0; table-layout: fixed; }
+      #sandbox td, #sandbox th { padding: 0; border: 0; overflow: hidden; font-size: 0; line-height: 0; }
+      #sandbox tr { height: 20px; }
+      #sandbox col { width: 20px; }
+    </style>
+    <!-- The IIFE build, as loaded from a CDN. -->
+    <script src="/dist/gridclip.global.js"></script>
+    <!-- The ESM build, as loaded by bundlers. -->
+    <script type="module">
+      import * as gridclip from '/dist/index.js';
+      window.gridclipESM = gridclip;
+    </script>
+  </head>
+  <body>
+    <div id="sandbox"></div>
+    <div id="text-sandbox"></div>
+    <div id="copy-source" tabindex="0">copy source</div>
+    <textarea id="paste-target"></textarea>
+    <div id="rich-target" contenteditable="true"></div>
+  </body>
+</html>

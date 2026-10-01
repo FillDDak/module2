@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run test:types
+      - run: npm run lint:package
+
+  runtimes:
+    name: Package smoke test (${{ matrix.runtime }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [node14, node16, node18, bun, deno]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build
+      - if: startsWith(matrix.runtime, 'node')
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.runtime == 'node14' && 14 || matrix.runtime == 'node16' && 16 || 18 }}
+      - if: startsWith(matrix.runtime, 'node')
+        run: node test/env/smoke.mjs && node test/env/smoke.cjs
+      - if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+      - if: matrix.runtime == 'bun'
+        run: bun test/env/smoke.mjs && bun test/env/smoke.cjs
+      - if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@v2
+      - if: matrix.runtime == 'deno'
+        run: deno run --allow-read test/env/smoke.mjs
+
+  browser:
+    name: Browser tests (Chromium)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
