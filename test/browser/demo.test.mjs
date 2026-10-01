@@ -1,7 +1,8 @@
 // Drives examples/demo.html like a user: select, copy, clear, paste.
 import assert from 'node:assert/strict';
 import { after, before, it } from 'node:test';
-import { launch } from './harness.mjs';
+import { fileURLToPath } from 'node:url';
+import { browserName, clipboardUnsupported, launch } from './harness.mjs';
 
 let ctx;
 before(async () => {
@@ -11,7 +12,7 @@ after(async () => {
   await ctx?.close();
 });
 
-it('copies a selection with merged cells and pastes it back', async () => {
+it('copies a selection with merged cells and pastes it back', { skip: clipboardUnsupported }, async () => {
   const { page, origin } = ctx;
   await page.setViewportSize({ width: 1000, height: 640 });
   await page.goto(`${origin}/examples/demo.html`);
@@ -45,5 +46,6 @@ it('copies a selection with merged cells and pastes it back', async () => {
   await page.click('#sample');
   await page.click('td[data-r="1"][data-c="0"]');
   await page.click('td[data-r="4"][data-c="5"]', { modifiers: ['Shift'] });
-  await page.screenshot({ path: new URL('../../docs/demo.png', import.meta.url).pathname });
+  // docs/demo.png is the README screenshot; keep it rendered by one engine.
+  if (browserName === 'chromium') await page.screenshot({ path: fileURLToPath(new URL('../../docs/demo.png', import.meta.url)) });
 });
