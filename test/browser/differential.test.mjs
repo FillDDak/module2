@@ -1,8 +1,10 @@
-// Differential tests: gridclip's DOM-free HTML parser against Chromium's own
-// HTML parser and layout engine, on thousands of generated inputs.
+// Differential tests: gridclip's DOM-free HTML parser against the browser's own
+// HTML parser and layout engine (BROWSER=chromium|firefox|webkit), on thousands
+// of generated inputs. gridclip follows Chromium; engine-specific differences
+// elsewhere are tolerated only where noted.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { launch } from './harness.mjs';
+import { browserName, launch } from './harness.mjs';
 
 /** Small seeded PRNG so failures are reproducible. */
 function rng(seed) {
@@ -78,14 +80,22 @@ function randomTable(r) {
   return `<table>${r.chance(0.2) ? '<caption>cap</caption>' : ''}${sections.join('')}</table>`;
 }
 
-describe('table model vs Chromium layout', () => {
-  it('places every cell exactly where Chromium renders it', async () => {
+// Playwright's WebKit for Windows needs 10–20 s or more to lay out one table with
+// ~1000 columns (colspan="1001" is clamped to 1000), which the generator produces
+// for about one table in ten. Such tables are left out of the layout comparison in
+// WebKit only; the clamping itself is still checked there by "tree building", which
+// compares the DOM's colSpan.
+const WEBKIT_MAX_COLUMNS = browserName === 'webkit' ? 200 : 0;
+
+describe(`table model vs ${browserName} layout`, () => {
+  it(`places every cell exactly where ${browserName} renders it`, async (t) => {
     for (let run = 0; run < RUNS; run++) {
       const r = rng(SEED + run);
       const cases = Array.from({ length: 1500 }, () => randomTable(r));
-      const mismatches = await ctx.page.evaluate((cases) => {
+      const { results, skipped } = await ctx.page.evaluate(({ cases, maxColumns }) => {
         const sandbox = document.getElementById('sandbox');
         const out = [];
+        let skipped = 0;
         for (const html of cases) {
           const ours = [];
           const parsed = window.gridclip.parseHTMLTable(html, {
@@ -93,29 +103,50 @@ describe('table model vs Chromium layout', () => {
           });
           sandbox.innerHTML = html;
           const table = sandbox.querySelector('table');
+          // One fixed 20px column per possible grid column. The sum of the colspans the
+          // browser itself reports bounds the width; far fewer <col>s than a fixed huge
+          // number keeps Firefox and WebKit layout fast.
+          const columns = [...table.querySelectorAll('td, th')].reduce((n, td) => n + td.colSpan, 1);
+          if (maxColumns && columns > maxColumns) {
+            skipped++;
+            continue;
+          }
           const colgroup = document.createElement('colgroup');
-          for (let i = 0; i < 5000; i++) colgroup.appendChild(document.createElement('col'));
+          for (let i = 0; i < columns; i++) colgroup.appendChild(document.createElement('col'));
           table.prepend(colgroup);
-          table.style.width = "100000px";
+          table.style.width = `${columns * 20}px`;
           const t = table.getBoundingClientRect();
           const rows = [...table.querySelectorAll('tr')].filter((tr) => tr.closest('table') === table);
           const rowRects = rows.map((tr) => tr.getBoundingClientRect());
           const theirs = [];
+          const rects = [];
           for (const [y, tr] of rows.entries()) {
             for (const td of tr.cells) {
               const rect = td.getBoundingClientRect();
+              rects.push(rect);
               let last = y;
               for (let k = y; k < rows.length; k++) if (Math.abs(rowRects[k].bottom - rect.bottom) < 0.5) last = k;
               theirs.push([td.localName, y, Math.round((rect.left - t.left) / 20), last - y + 1, Math.round(rect.width / 20)]);
             }
           }
+          // Cells the engine draws on top of each other: a table model error, rendered differently by each engine.
+          const overlap = rects.some((a, i) =>
+            rects.some((b, j) => j > i && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5),
+          );
           const width = Math.max(0, ...theirs.map(([, , c, , cs]) => c + cs));
           const shapeOk = parsed.rows.length === rows.length && parsed.rows.every((row) => row.length === width);
-          if (JSON.stringify(ours) !== JSON.stringify(theirs) || !shapeOk) out.push({ html, ours, theirs, shapeOk });
+          if (JSON.stringify(ours) !== JSON.stringify(theirs) || !shapeOk) out.push({ html, ours, theirs, shapeOk, overlap });
         }
-        return out;
-      }, cases);
-      reportMismatches(mismatches, 'table model');
+        return { results: out, skipped };
+      }, { cases, maxColumns: WEBKIT_MAX_COLUMNS });
+      if (skipped) t.diagnostic(`${skipped} table(s) wider than ${WEBKIT_MAX_COLUMNS} columns not laid out in ${browserName}`);
+      // gridclip places cells by the HTML table model, which Chromium's layout follows even
+      // for overlapping cells. Firefox and WebKit stretch or shift overlapping cells instead
+      // (the DOM rowSpan/colSpan still agree), and no spreadsheet emits overlapping spans, so
+      // in those engines such tables are reported, not failed.
+      const tolerated = browserName === 'chromium' ? [] : results.filter((m) => m.overlap);
+      if (tolerated.length) t.diagnostic(`${tolerated.length} table(s) with overlapping cells render differently in ${browserName}`);
+      reportMismatches(results.filter((m) => !tolerated.includes(m)), 'table model');
     }
   });
 });
@@ -134,7 +165,7 @@ const FUZZ_TOKENS = [
   '<td\n>', '<td a=b c d=\'e\'>', '<img>', '<input type=hidden>', '<form>', '</form>',
 ];
 
-describe('tree building vs Chromium parser', () => {
+describe(`tree building vs ${browserName} parser`, () => {
   it('finds the same rows and cells in fuzzed markup', async () => {
     for (let run = 0; run < RUNS; run++) {
       const r = rng(SEED * 7 + run);
@@ -174,7 +205,7 @@ describe('tree building vs Chromium parser', () => {
 // 3. Character references, in text and in attribute values.
 // ---------------------------------------------------------------------------
 
-describe('character references vs Chromium parser', () => {
+describe(`character references vs ${browserName} parser`, () => {
   it('decodes text and attributes identically', async () => {
     const r = rng(SEED * 13 + RUNS);
     const alphabet = ['&', '&', '#', 'x', 'X', '1', '2', '8', '9', '0', 'a', 'F', ';', ';', 'amp', 'lt', 'gt', 'copy', 'not', 'notin',
@@ -199,7 +230,7 @@ describe('character references vs Chromium parser', () => {
     reportMismatches(mismatches, 'character reference');
   });
 
-  it('knows every named reference Chromium supports from the HTML 4 set', async () => {
+  it(`knows every named reference ${browserName} supports from the HTML 4 set`, async () => {
     const mismatches = await ctx.page.evaluate(() => {
       // Every name gridclip knows must decode exactly like the browser does.
       const names = ['nbsp', 'iexcl', 'cent', 'pound', 'curren', 'yen', 'brvbar', 'sect', 'uml', 'copy', 'ordf', 'laquo', 'not', 'shy',
@@ -305,16 +336,44 @@ async function compareInnerText(cases, normalise) {
   );
 }
 
-describe('cell text vs innerText', () => {
-  it('matches innerText exactly on inline content, blocks, white-space modes and hidden content', async () => {
+/**
+ * gridclip follows Chromium, whose innerText drops a collapsible space at the end
+ * of a line (as CSS Text requires) but keeps one before a <br> or newline that is
+ * itself in a preserving context. Firefox's innerText differs in exactly that
+ * spot, in both directions: it can keep a trailing collapsible space (before a
+ * block, or after preserved spaces) and drops the one before a preserved break.
+ * Neither shape occurs in spreadsheet clipboard HTML. So in other engines a line
+ * that differs only by one space at its end is tolerated (and reported); anything
+ * else still fails.
+ */
+function checkInnerText(t, mismatches, label) {
+  const oneEndSpace = (ours, theirs) => {
+    const a = ours.split('\n');
+    const b = theirs.split('\n');
+    return a.length === b.length && a.every((line, i) => line === b[i] || line === `${b[i]} ` || `${line} ` === b[i]);
+  };
+  const tolerated = browserName === 'chromium' ? [] : mismatches.filter((m) => oneEndSpace(m.ours, m.theirs));
+  if (tolerated.length) t.diagnostic(`${tolerated.length} case(s) differ from ${browserName}'s innerText only by a space at the end of a line`);
+  reportMismatches(mismatches.filter((m) => !tolerated.includes(m)), label);
+}
+
+// WebKit's innerText does not match its own rendering: for
+// `<span style="white-space:pre-line">y\n z</span>` it returns "y z" although "z"
+// is laid out on the next line, and it appends a line break after a final block.
+// It cannot serve as the oracle there; WebKit still runs the layout, tree-building
+// and character-reference comparisons above.
+const innerTextUnreliable = browserName === 'webkit' ? "WebKit's innerText disagrees with its own layout (pre-line newlines, trailing blocks)" : false;
+
+describe('cell text vs innerText', { skip: innerTextUnreliable }, () => {
+  it('matches innerText exactly on inline content, blocks, white-space modes and hidden content', async (t) => {
     for (let run = 0; run < RUNS; run++) {
       const r = rng(SEED * 31 + run);
       const cases = Array.from({ length: 5000 }, () => randomContent(r, { strict: true }));
-      reportMismatches(await compareInnerText(cases, false), 'innerText');
+      checkInnerText(t, await compareInnerText(cases, false), 'innerText');
     }
   });
 
-  it('produces the same lines as innerText with <br>, <pre> and preserved newlines', async () => {
+  it('produces the same lines as innerText with <br>, <pre> and preserved newlines', async (t) => {
     // innerText adds a line break where nothing renders (a final <br> or
     // newline before a block boundary); gridclip follows the rendered lines,
     // which is what makes `<td><br></td>` an empty cell. So compare the
@@ -322,7 +381,7 @@ describe('cell text vs innerText', () => {
     for (let run = 0; run < RUNS; run++) {
       const r = rng(SEED * 37 + run);
       const cases = Array.from({ length: 5000 }, () => randomContent(r, { strict: false }));
-      reportMismatches(await compareInnerText(cases, true), 'innerText (normalised)');
+      checkInnerText(t, await compareInnerText(cases, true), 'innerText (normalised)');
     }
   });
 });
