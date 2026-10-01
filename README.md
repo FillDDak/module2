@@ -364,7 +364,7 @@ gridclip is tested at several levels (`npm run check` runs them all):
   - Fuzzed malformed markup is checked against the browser's **tree builder**.
   - Character references are checked in text and attributes.
   - Cell text is checked against `innerText` (exact match for inline content, line-by-line where `innerText` adds line breaks that don't render).
-- **End-to-end tests** with the real system clipboard in Chromium and Firefox (and WebKit on Linux; Playwright's WebKit for Windows has no working clipboard): keyboard copy and paste, cut, pasting into `<textarea>` and `contenteditable`, the Async Clipboard API, and the `execCommand`/`writeText` fallbacks. Also the demo app, driven like a user would. Run one engine with `npm run test:browser:firefox` (or `:chromium`, `:webkit`); `npx playwright install chromium firefox webkit` installs them.
+- **End-to-end tests** with the real system clipboard in Chromium and Firefox (Playwright cannot grant clipboard access in WebKit, so there only the browser's own text paste is exercised; Safari is checked by hand): keyboard copy and paste, cut, pasting into `<textarea>` and `contenteditable`, the Async Clipboard API, and the `execCommand`/`writeText` fallbacks. Also the demo app, driven like a user would. Run one engine with `npm run test:browser:firefox` (or `:chromium`, `:webkit`); `npx playwright install chromium firefox webkit` installs them.
 - **Runtimes and packaging**: smoke tests of the built ESM and CommonJS packages on Node 14, 16, 18, 20, 22 and 24, Bun and Deno. Type tests against the published declarations under `node10`, `node16` and `bundler` resolution. `publint` and `@arethetypeswrong/cli`.
 
 ## License

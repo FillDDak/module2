@@ -2,7 +2,7 @@
 // keyboard copy/paste, the Async Clipboard API and the execCommand fallback.
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { browserName, clipboardUnsupported, launch } from './harness.mjs';
+import { browserName, clipboardUnsupported, launch, nativePasteUnsupported } from './harness.mjs';
 
 let ctx;
 before(async () => {
@@ -87,7 +87,7 @@ describe('keyboard copy and paste', () => {
     assert.deepEqual(result.reparsed, { rows: GRID, merges: MERGES });
   });
 
-  it('pastes the text flavour into a textarea as TSV', { skip }, async () => {
+  it('pastes the text flavour into a textarea as TSV', { skip: nativePasteUnsupported }, async () => {
     const { page } = ctx;
     await page.evaluate((grid) => window.gridclip.copyToClipboard(grid), GRID);
     await page.focus('#paste-target');

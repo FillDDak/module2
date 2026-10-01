@@ -338,7 +338,7 @@ applyPaste([['a', 'b'], ['c', 'd']], [['X']], { rows: 2, cols: 2 }).grid; // [['
   - 퍼징한 잘못된 마크업은 브라우저의 트리 빌더와 비교합니다.
   - 문자 참조는 텍스트와 속성에서 비교합니다.
   - 셀 텍스트는 `innerText`와 비교합니다.
-- **E2E 테스트**: Chromium과 Firefox(그리고 Linux의 WebKit. Windows용 Playwright WebKit은 클립보드가 동작하지 않습니다)에서 실제 시스템 클립보드로 확인합니다. 엔진 하나만 돌리려면 `npm run test:browser:firefox`(또는 `:chromium`, `:webkit`)를 쓰고, 브라우저는 `npx playwright install chromium firefox webkit`으로 설치합니다. 키보드 복사·붙여넣기, 잘라내기, `<textarea>`와 `contenteditable`에 붙여넣기, Async Clipboard API, `execCommand`/`writeText` 대체 경로를 확인하고, 데모 앱도 사용자처럼 조작해 봅니다.
+- **E2E 테스트**: Chromium과 Firefox에서 실제 시스템 클립보드로 확인합니다(Playwright는 WebKit에 클립보드 접근 권한을 줄 수 없어 WebKit에서는 브라우저 자체의 텍스트 붙여넣기만 확인하며, Safari는 직접 확인합니다). 엔진 하나만 돌리려면 `npm run test:browser:firefox`(또는 `:chromium`, `:webkit`)를 쓰고, 브라우저는 `npx playwright install chromium firefox webkit`으로 설치합니다. 키보드 복사·붙여넣기, 잘라내기, `<textarea>`와 `contenteditable`에 붙여넣기, Async Clipboard API, `execCommand`/`writeText` 대체 경로를 확인하고, 데모 앱도 사용자처럼 조작해 봅니다.
 - **런타임·패키징**:
   - 빌드된 ESM/CommonJS 패키지를 Node 14·16·18·20·22·24, Bun, Deno에서 스모크 테스트합니다.
   - 배포되는 타입 선언을 `node10`/`node16`/`bundler` 해석 방식으로 각각 컴파일해 봅니다.

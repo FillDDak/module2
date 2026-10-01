@@ -31,14 +31,26 @@ if (!['chromium', 'firefox', 'webkit'].includes(browserName)) {
 
 /**
  * Why the system-clipboard tests cannot run in this browser, or false. Pass it
- * as node:test's `skip` option. Playwright's WebKit for Windows (the WinCairo
- * port, not Safari) has no working clipboard: `navigator.clipboard.read()` and
- * `readText()` reject, and paste events see empty `getData()` results even for
- * data written by the same page or copied from Excel (checked on Windows 11).
+ * as node:test's `skip` option. Playwright cannot grant clipboard permissions in
+ * WebKit, so `navigator.clipboard.read()`/`readText()` reject with
+ * NotAllowedError, and the paste events it triggers expose empty
+ * `clipboardData.getData()`, even for data the page just wrote or data copied
+ * from Excel (seen on Windows 11 and on Linux CI). Real Safari, where the user
+ * presses Cmd+V, is not affected by this and has to be checked by hand.
  */
 export const clipboardUnsupported =
+  browserName === 'webkit'
+    ? 'Playwright cannot grant clipboard access in WebKit: reads reject (NotAllowedError) and paste events see no data'
+    : false;
+
+/**
+ * The browser's own paste into a textarea (no script reads the clipboard) works
+ * in WebKit on Linux but not in Playwright's WebKit for Windows (WinCairo), where
+ * the textarea stays empty.
+ */
+export const nativePasteUnsupported =
   browserName === 'webkit' && process.platform === 'win32'
-    ? "Playwright's WebKit for Windows has no working system clipboard (reads reject, paste events are empty)"
+    ? "Playwright's WebKit for Windows does not paste into a textarea"
     : false;
 
 export async function launch() {
