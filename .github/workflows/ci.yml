@@ -59,9 +59,13 @@ jobs:
         run: deno run --allow-read test/env/smoke.mjs
 
   browser:
-    name: Browser tests (Chromium)
+    name: Browser tests (${{ matrix.browser }})
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -69,5 +73,24 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run build
+      - run: node test/browser/run.mjs ${{ matrix.browser }}
+
+  windows:
+    name: Windows (unit, package and browser tests)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:env
+      - run: npm run test:types
+      - run: npx playwright install chromium firefox webkit
       - run: npm run test:browser

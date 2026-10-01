@@ -1,8 +1,8 @@
-// End-to-end tests against the real system clipboard in Chromium:
+// End-to-end tests against the real system clipboard (BROWSER=chromium|firefox|webkit):
 // keyboard copy/paste, the Async Clipboard API and the execCommand fallback.
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { launch } from './harness.mjs';
+import { browserName, clipboardUnsupported, launch } from './harness.mjs';
 
 let ctx;
 before(async () => {
@@ -23,14 +23,19 @@ const GRID = [
 ];
 const MERGES = [{ row: 0, col: 2, rowSpan: 1, colSpan: 2 }];
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+const skip = clipboardUnsupported;
 
 describe('keyboard copy and paste', () => {
-  it('copies with setClipboardData in a copy handler and pastes with parseClipboard', async () => {
+  it('copies with setClipboardData in a copy handler and pastes with parseClipboard', { skip }, async () => {
     const { page } = ctx;
     await page.evaluate(
       ({ grid, merges }) => {
         const { setClipboardData, parseClipboard } = window.gridclipESM;
-        document.getElementById('copy-source').addEventListener('copy', (event) => setClipboardData(event, grid, { merges }));
+        // Like the README: a non-editable source listens on document and checks focus, because
+        // with no selection Firefox fires copy/cut at <body> rather than at the focused element.
+        document.addEventListener('copy', (event) => {
+          if (document.activeElement.id === 'copy-source') setClipboardData(event, grid, { merges });
+        });
         document.getElementById('paste-target').addEventListener('paste', (event) => {
           window.pasted = parseClipboard(event);
           event.preventDefault();
@@ -46,10 +51,12 @@ describe('keyboard copy and paste', () => {
     assert.deepEqual(pasted, { rows: GRID, merges: MERGES, source: 'text' });
   });
 
-  it('cut events work the same way', async () => {
+  it('cut events work the same way', { skip }, async () => {
     const { page } = ctx;
     await page.evaluate((grid) => {
-      document.getElementById('copy-source').addEventListener('cut', (event) => window.gridclip.setClipboardData(event, grid));
+      document.addEventListener('cut', (event) => {
+        if (document.activeElement.id === 'copy-source') window.gridclip.setClipboardData(event, grid);
+      });
     }, GRID);
     await page.focus('#copy-source');
     await page.keyboard.press(`${modifier}+KeyX`);
@@ -57,7 +64,7 @@ describe('keyboard copy and paste', () => {
     assert.deepEqual(read.rows, GRID);
   });
 
-  it('pastes the HTML flavour into a contenteditable as a real table', async () => {
+  it('pastes the HTML flavour into a contenteditable as a real table', { skip }, async () => {
     const { page } = ctx;
     await page.evaluate(
       ({ grid, merges }) => window.gridclip.copyToClipboard(grid, { merges }),
@@ -80,7 +87,7 @@ describe('keyboard copy and paste', () => {
     assert.deepEqual(result.reparsed, { rows: GRID, merges: MERGES });
   });
 
-  it('pastes the text flavour into a textarea as TSV', async () => {
+  it('pastes the text flavour into a textarea as TSV', { skip }, async () => {
     const { page } = ctx;
     await page.evaluate((grid) => window.gridclip.copyToClipboard(grid), GRID);
     await page.focus('#paste-target');
@@ -91,7 +98,7 @@ describe('keyboard copy and paste', () => {
 });
 
 describe('Async Clipboard API', () => {
-  it('round-trips both flavours through the system clipboard', async () => {
+  it('round-trips both flavours through the system clipboard', { skip }, async () => {
     const { page } = ctx;
     const result = await page.evaluate(
       async ({ grid, merges }) => {
@@ -110,7 +117,7 @@ describe('Async Clipboard API', () => {
     assert.deepEqual(result.read, { rows: GRID, merges: MERGES, source: 'text' });
   });
 
-  it('reads clipboard content written by other apps (simulated Google Sheets copy)', async () => {
+  it('reads clipboard content written by other apps (simulated Google Sheets copy)', { skip }, async () => {
     const { page } = ctx;
     const read = await page.evaluate(async () => {
       const html =
@@ -133,7 +140,7 @@ describe('Async Clipboard API', () => {
     });
   });
 
-  it('falls back to readText when only text is on the clipboard', async () => {
+  it('falls back to readText when only text is on the clipboard', { skip }, async () => {
     const { page } = ctx;
     const read = await page.evaluate(async () => {
       await navigator.clipboard.writeText('x\ty\nz\tw');
@@ -144,7 +151,7 @@ describe('Async Clipboard API', () => {
 });
 
 describe('fallbacks', () => {
-  it('uses execCommand when the Async Clipboard API is missing', async () => {
+  it('uses execCommand when the Async Clipboard API is missing', { skip }, async () => {
     const { page } = ctx;
     await page.evaluate((grid) => {
       const realRead = navigator.clipboard.read.bind(navigator.clipboard);
@@ -173,7 +180,7 @@ describe('fallbacks', () => {
     assert.equal(textareas, 1, 'the temporary textarea is removed');
   });
 
-  it('uses writeText when only text can be written', async () => {
+  it('uses writeText when only text can be written', { skip }, async () => {
     const { page } = ctx;
     const result = await page.evaluate(async (grid) => {
       delete window.ClipboardItem;
@@ -182,7 +189,12 @@ describe('fallbacks', () => {
       return { method, text: await navigator.clipboard.readText() };
     }, GRID);
     assert.equal(result.method, 'write-text');
-    assert.equal(result.text, await ctx.page.evaluate((grid) => window.gridclip.stringifyTSV(grid), GRID));
+    const tsv = await ctx.page.evaluate((grid) => window.gridclip.stringifyTSV(grid), GRID);
+    // Chromium on Windows stores text with CRLF line breaks (Blink's SystemClipboard::WriteText
+    // calls ReplaceNewlinesWithPlatformNewlines on Windows only), so readText returns CRLF there.
+    const platformText = browserName === 'chromium' && process.platform === 'win32' ? tsv.replace(/\n/g, '\r\n') : tsv;
+    assert.equal(result.text, platformText);
+    assert.deepEqual(await ctx.page.evaluate((text) => window.gridclip.parseTSV(text), result.text), GRID);
   });
 
   it('rejects with a helpful error when nothing works', async () => {
